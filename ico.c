@@ -11,8 +11,10 @@
 
 #define PNG 0x474e5089
 #define MAXFILENAMELENGTH 255
+#define MAXFILENO 256
 
 typedef struct {
+  int           extract; // Extract: 1. No extract: 0.
   u_int16_t     fileno; // Number of bitmap in .ico file
   char          filename[MAXFILENAMELENGTH + 1]; // Name of file to be read
 } arguments;
@@ -35,9 +37,16 @@ typedef struct
   u_int16_t     wBitCount;       // Bits per pixel
   u_int32_t     dwBytesInRes;    // How many bytes in this resource?
   u_int32_t     dwImageOffset;   // Where in the file is this image?
-
 } ICONDIRENTRY;
 #define IDEN_SZ sizeof(ICONDIRENTRY)
+
+typedef struct {
+  u_int32_t     size;
+  u_int16_t     reserved1;
+  u_int16_t     reserved2;
+  u_int32_t     offset;
+} BITMAPFILEHEADER;
+#define BMPFH_SZ sizeof(BITMAPFILEHEADER)
 
 typedef struct {
   u_int32_t     biSize;
@@ -60,8 +69,13 @@ void fferror(FILE* f, char* filename) {
   exit(1);
 }
 
+void memerror(char* msg) {
+  fprintf(stderr, "Memory allocation error: %s", msg);
+}
+
 arguments parseargs(int argc, char** argv);
 int zero256(u_int8_t u) { return u ? u : 256; }
+void extract(FILE* f, ICONDIRENTRY* idir, arguments* args, char* extension);
 void read_bmphdr(FILE* f, long offset, char* filename); 
 void read_colortbl(FILE* f, ICONDIRENTRY* direntry, BITMAPINFOHEADER* hdr,
         char* filename);
@@ -74,24 +88,18 @@ int main(int argc, char** argv) {
   ICONDIRENTRY* ic_dir;
   size_t dirbytes; // Length of ic_dir in bytes
 
-  /* args = parseargs(argc, argv); */
+  args = parseargs(argc, argv);
 
-  if (argc != 2) {
-    fprintf(stderr, "No filename provided\n");
-    exit(1);
+  if ((f = fopen(args.filename, "r")) == NULL) {
+    error(1, errno, "Can't open file %s\n", args.filename);
   }
-
-  if ((f = fopen(argv[1], "r")) == NULL) {
-    error(1, errno, "Can't open file %s\n", argv[1]);
-  }
-
 
   if (fread(&iconhdr, 1, IDIR_SZ, f) != IDIR_SZ) {
-    fferror(f, argv[1]);
+    fferror(f, args.filename);
   }
 
   if (iconhdr.idType != 1) {
-    fferror(f, argv[1]);
+    fferror(f, args.filename);
   }
 
   printf("Number of images: %u\n", iconhdr.idCount);
@@ -99,9 +107,8 @@ int main(int argc, char** argv) {
   dirbytes = iconhdr.idCount * IDEN_SZ;
   ic_dir = (ICONDIRENTRY*)malloc(dirbytes);
 
-
   if (fread(ic_dir, 1, dirbytes, f) != dirbytes) {
-    fferror(f, argv[1]);
+    fferror(f, args.filename);
   }
 
   // Print directory entries:
@@ -117,6 +124,9 @@ int main(int argc, char** argv) {
     printf("Image Offset  : %#x\n", ic_dir[i].dwImageOffset);
 
     read_bmphdr(f, (long)ic_dir[i].dwImageOffset, argv[1]);
+    if ((i == args.fileno) & args.extract) {
+      extract(f, &ic_dir[i], &args, "bmp");
+    }
   } 
 
   fclose(f);
@@ -165,21 +175,39 @@ void read_colortbl(FILE* f, ICONDIRENTRY* direntry, BITMAPINFOHEADER* hdr,
 
 }
 
-arguments parseoptions(int argc, char** argv) {
+arguments parseargs(int argc, char** argv) {
 
   int optchar; // Option character returned by getopt
   arguments args; 
 
-              //
-  while ((optchar = getopt(argc, argv, "x:") != -1)) {
+  if (argc < 2) {
+    fprintf(stderr, "No argument provided. Filename is mandatory.\n");
+    exit(1);
+  }
 
+  memset(&args, 0, sizeof(arguments));
+
+  while ((optchar = getopt(argc, argv, "xn:")) != -1) {
     switch (optchar) {
-
-      case 'x': 
+      case 'n': 
         args.fileno = atoi(optarg);
         break;
-
+      case 'x': 
+        args.extract = 1;
+        break;
+      default:
+        fprintf(stderr, "Unrecognized option -%c. Ignored", optchar);
     }
+  }
+
+  if (args.fileno > MAXFILENO) {
+    fprintf(stderr, "FILENO must be smaller than %d\n", MAXFILENO);
+    exit(1);
+  }
+
+  if (argv[optind] == 0) {
+    fputs("Filename is mandatory.\n", stderr);
+    exit(1);
   }
 
   if (strlen(argv[optind]) >  MAXFILENAMELENGTH) {
@@ -190,5 +218,63 @@ arguments parseoptions(int argc, char** argv) {
   strcpy(args.filename, argv[optind]);
 
   return args;
+}
 
+void extract(FILE* f, ICONDIRENTRY* idir, arguments* args, char* extension) {
+
+  FILE* sf;
+  char* savefile;
+  char* extpos; // position of last dot in filename
+  u_int8_t* buffer; // Read/write buffer
+  size_t bmp_size = idir->dwBytesInRes; // Length of bitmap data
+  char bm[2] = "BM";
+  BITMAPFILEHEADER bmp_fheader;
+
+  // Create new filename: add -<fileno>.bmp to basename
+  if ((savefile = (char*)malloc(strlen(args->filename) + 4)) == NULL) {
+    memerror("extract - savefile");
+    exit(1);
+  }
+  strcpy(savefile, args->filename);
+  extpos = strrchr(savefile, '.');
+  sprintf(extpos, "-%hu.%s", args->fileno, extension);
+
+  printf("Save filename: %s\n",  savefile);
+
+  if ((sf = fopen(savefile, "w")) == NULL) {
+    fprintf(stderr, "Could not save to file %s\n", savefile);
+    free(savefile);
+    return;
+  }
+
+  if (strcmp(extension, "bmp") == 0) {
+    // Set the BITMAPFILEHEADER
+    memset(&bmp_fheader, 0, BMPFH_SZ);
+    bmp_fheader.size = bmp_size + BMPFH_SZ;
+    // Compute bitmap image data offset
+    bmp_fheader.offset = 0x36; // BMPFH (0x0E) + BMPIH (0x28)
+
+    // Write the BITMAPFILEHEADER to the file
+    fwrite(&bm, 2, 1, sf);
+    fwrite(&bmp_fheader, BMPFH_SZ, 1, sf);
+
+    // Allocate memory for buffer
+    if ((buffer = (u_int8_t*)malloc(bmp_size)) == NULL) {
+      memerror("extract - buffer");
+      fclose(sf);
+      free(savefile);
+      exit(1);
+    }
+
+    // Write the bitmap data to the file
+    fseek(f, idir->dwImageOffset, SEEK_SET);
+    fread(buffer, bmp_size, 1, f);
+    fwrite(buffer, bmp_size, 1, sf);
+    free(buffer);
+    fclose(sf);
+
+    printf("Image %d written to %s\n", args->fileno, savefile);
+  }
+
+  free(savefile);
 }
