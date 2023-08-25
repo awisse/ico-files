@@ -16,9 +16,9 @@
 
 // Rightshift of 32 bit colors 
 #define xcolor(C, Shift) (u_int8_t)((C >> Shift) & 0xFF)
-#define RED 2
-#define GREEN 4
-#define BLUE 6
+#define RED 0
+#define GREEN 8
+#define BLUE 16
 
 typedef struct {
   int           extract; // Extract: 1. No extract: 0.
@@ -223,12 +223,7 @@ int read_bmphdr(FILE* f, long offset, BITMAPINFOHEADER* hdr) {
 }
 
 int read_colortbl(FILE* f, BITMAPINFOHEADER* hdr) {
-  /* TODO:Try to identify color table (palette) entries between the end of the 
-   * BITMAPINFOHEADER and the beginning of the Image. The beginning of the 
-   * colortbl est à direntry->dwImageOffset + BMIH_SZ.
-   * The end is at direntry->dwImageOffset + direntry->dwBytesInRes -
-   * hdr->biSizeImage.
-   */
+  /* Read and display colortable if there is one */
   u_int32_t i, color, num_colors = 1 << hdr->biBitCount;
 
   puts("Color table:");
