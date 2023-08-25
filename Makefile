@@ -1,10 +1,27 @@
-# Make the readico program
+# Make the readico and readbmp programs
 #
-release : ico.c
-	gcc -o readico ico.c
+CC=gcc -o
+DEBUG=-ggdb -DDEBUG
+RM=rm -f
 
-debug: ico.c
-	gcc -ggdb -o ri-db -DDEBUG ico.c
+all : release debug
 
+release: readico readbmp
+
+debug: ri-db rb-db
+
+ri-db: ico.c
+	$(CC) ri-db $(DEBUG) ico.c
+
+rb-db: bmp.c
+	$(CC) rb-db $(DEBUG) bmp.c
+
+readico: ico.c
+	$(CC) readico ico.c
+
+readbmp: bmp.c
+	$(CC) readbmp bmp.c
+
+.PHONY : clean
 clean:
-	rm readico ri-db
+	$(RM) readico readbmp ri-db rb-db
