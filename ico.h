@@ -73,7 +73,7 @@ typedef struct {
 void fferror(FILE* f, char* msg) {
   fprintf(stderr, "Error reading .ico file: %s\n", msg);
   fclose(f);
-  exit(1);
+  exit(EXIT_FAILURE);
 }
 
 void memerror(char* msg) {
@@ -87,3 +87,4 @@ int read_bmphdr(FILE* f, long offset, BITMAPINFOHEADER* hdr);
 int read_colortbl(FILE* f, BITMAPINFOHEADER* hdr);
 int showand(FILE* f, ICONDIRENTRY* direntry, BITMAPINFOHEADER* hdr);
 int extract(FILE* f, ICONDIRENTRY* idir, arguments* args, char* extension);
+void helpmsg();

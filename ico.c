@@ -26,6 +26,8 @@ int main(int argc, char** argv) {
   }
 
   if (iconhdr.idType != 1) {
+    if (iconhdr.idType != 2) 
+      fferror(f, "Not an icon file");
     fferror(f, "Icon ID type");
   }
 
@@ -77,7 +79,7 @@ int main(int argc, char** argv) {
 
     if (args.showand) {
       if (showand(f, direntry, &bmih)) 
-        fferror(f, "AND mask");
+        fferror(f, "seeking AND mask");
     }
 
     if (args.extract) {
@@ -158,6 +160,7 @@ arguments parseargs(int argc, char** argv) {
 
   if (argc < 2) {
     fprintf(stderr, "No argument provided. Filename is mandatory.\n");
+    helpmsg();
     exit(1);
   }
 
@@ -165,7 +168,7 @@ arguments parseargs(int argc, char** argv) {
   memset(&args, 0, sizeof(arguments));
   args.fileno = MAXHW; // Default: show all entries without detail
 
-  while ((optchar = getopt(argc, argv, "acn:x")) != -1) {
+  while ((optchar = getopt(argc, argv, "achn:x")) != -1) {
     switch (optchar) {
       case 'a':
         args.showand = TRUE;
@@ -173,6 +176,9 @@ arguments parseargs(int argc, char** argv) {
       case 'c':
         args.colortable = TRUE;
         break;
+      case 'h':
+        helpmsg();
+        exit(0);
       case 'n': 
         args.fileno = atoi(optarg);
         break;
@@ -186,6 +192,7 @@ arguments parseargs(int argc, char** argv) {
 
   if (argv[optind] == 0) {
     fputs("Filename is mandatory.\n", stderr);
+    helpmsg();
     exit(1);
   }
 
@@ -200,12 +207,30 @@ arguments parseargs(int argc, char** argv) {
 }
 
 int showand(FILE* f, ICONDIRENTRY* direntry, BITMAPINFOHEADER* hdr) {
-  // Show the AND bitmask as ASCII art
+  /* Show the AND bitmask as ASCII art */
+  long clr_tbl_size = 0; // Size of color table
+  long image_size; // Size of image in bytes
+  long and_map_pos; // Position of AND map in file
+  u_int8_t width = direntry->bWidth, height = direntry->bHeight;
+  u_int16_t clr_bits = direntry->wBitCount;
+
+  // Position the file at the beginning of the AND mask
+  image_size = width * height * clr_bits / 8;
+  clr_tbl_size = clr_bits <= 8 ? (1 << clr_bits) * 4 : 0;
+  and_map_pos = direntry->dwImageOffset + hdr->biSize + clr_tbl_size 
+    + image_size;
+
+  if (fseek(f, and_map_pos, SEEK_SET) == -1) {
+    return -1;
+  }
+
+  // TODO: Read the AND mask.
   return 0;
 }
 
 int extract(FILE* f, ICONDIRENTRY* idir, arguments* args, char* extension) {
 
+  // TODO: Extract only the image, not the AND mask
   FILE* sf;
   char* savefile;
   char* extpos; // position of last dot in filename
@@ -269,3 +294,14 @@ int extract(FILE* f, ICONDIRENTRY* idir, arguments* args, char* extension) {
 
   return 0;
 }
+
+void helpmsg() {
+  
+  puts("Usage:   readico (or ri-db) [options] <.ico file>\n\n"
+       "  -h     This help message.\n"
+       "  -n <N> Select image number N.\n"
+       "  -x     Extract image selected with -n.\n"
+       "  -c     Print colortable of selected image.\n"
+       "  -a     Print AND bitmap in ASCII art of selected image.\n");
+}
+
