@@ -11,9 +11,11 @@
 #define MAXFILENAMELENGTH 255
 #define MAXHW 0XFFFF
 #define TRUE 1
+#define ONE '*'
+#define ZERO ' '
+#define MASKBIT(dw) dw & 1 ? ZERO : ONE
 
 // Rightshift of 32 bit colors 
-#define xcolor(C, Shift) (u_int8_t)((C >> Shift) & 0xFF)
 #define RED 0
 #define GREEN 8
 #define BLUE 16
@@ -22,7 +24,7 @@ typedef struct {
   int           extract; // Extract: 1. No extract: 0.
   u_int16_t     fileno; // Number of bitmap in .ico file
   char          filename[MAXFILENAMELENGTH + 1]; // Name of file to be read
-  int           showand; // Show icAND in ASCII art
+  int           show_mask; // Show icAND in ASCII art
   int           colortable; // Show colortable
 } arguments;
 
@@ -85,6 +87,6 @@ int zero256(u_int8_t u) { return u ? u : 256; }
 void print_direntry(ICONDIRENTRY* direntry);
 int read_bmphdr(FILE* f, long offset, BITMAPINFOHEADER* hdr);
 int read_colortbl(FILE* f, BITMAPINFOHEADER* hdr);
-int showand(FILE* f, ICONDIRENTRY* direntry, BITMAPINFOHEADER* hdr);
-int extract(FILE* f, ICONDIRENTRY* idir, arguments* args, char* extension);
+int show_icon_mask(FILE* f, ICONDIRENTRY* direntry, BITMAPINFOHEADER* hdr);
+int extract_bmp(FILE* f, ICONDIRENTRY* idir, arguments* args);
 void helpmsg();
