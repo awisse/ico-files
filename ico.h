@@ -13,7 +13,7 @@
 #define TRUE 1
 #define ONE '*'
 #define ZERO ' '
-#define MASKBIT(dw) dw & 1 ? ZERO : ONE
+#define MASKBIT(byte) byte & 0x80 ? ZERO : ONE
 
 // Rightshift of 32 bit colors 
 #define RED 0

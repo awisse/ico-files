@@ -212,58 +212,64 @@ arguments parseargs(int argc, char** argv) {
 
 int show_icon_mask(FILE* f, ICONDIRENTRY* direntry, BITMAPINFOHEADER* hdr) {
   /* Show the AND bitmask as ASCII art */
-  long clrtbl_sz; // Size of color table
-  long image_size; // Size of image in bytes
+  u_int32_t clrtbl_sz; // Size of color table
+  size_t bmp_sz, stride; // Size of image in bytes
   long and_map_pos; // Position of AND map in file
   u_int8_t width = direntry->bWidth, height = direntry->bHeight;
   u_int16_t clr_bits = direntry->wBitCount;
 
-  // Position the file at the beginning of the AND mask
-  image_size = width * height * clr_bits / 8;
+  /* Compute the position of the beginning of the AND mask. It is given
+   * by: Start of the image (dwImageOffset) + sizeof(BITMAPINFOHEADER) +
+   * the size of the colortable + the size of the XOR mask (the color 
+   * image bits)
+   */
+  // Compute the size of the colortable
   clrtbl_sz = clr_bits <= 8 ? (1 << clr_bits) * 4 : 0;
-  and_map_pos = direntry->dwImageOffset + hdr->biSize + clrtbl_sz 
-    + image_size;
+  // The XOR bitmap size is given by the "stride"
+  stride = ((((width * clr_bits) + 0x1F) & 0xFFE0) >> 3);
+  bmp_sz = stride * height;
 
+  // Compute the position of the AND map
+  and_map_pos = direntry->dwImageOffset + hdr->biSize + clrtbl_sz 
+    + bmp_sz;
+
+  // Position the file pointer at the beginning of the AND mask
   if (fseek(f, and_map_pos, SEEK_SET) == -1) {
     return -1;
   }
 
-  /* TODO: Read the AND mask.
-   * The AND mask is aligned to 32 bits. For example:
+  /* The AND mask is aligned to 32 bits. For example:
    * for a 9x9 bitmap, the last 23 bits are zero for each row,
    * for a 48x48 bitmap, the last 16 bits are zero.
-   * The mask is in the file bottom-up. Hence we have to build the mask fully
-   * in memory before printing it starting with the top line.
+   * The mask is in the file bottom-up. Hence we have to build the mask 
+   * fully in memory before printing it starting with the top line.
    */
-  // TODO: After development is finished, move these definitions up.
-  u_int32_t i, j, k, colorRGBA;
+  int i, j, k; 
+  u_int8_t maskbits[4], byte; // Read bytes from file in correct order
   char ascii_mask[height][width + 1];
 
-  for (i = 0; i < height; i++) {
-    // 32 bit chunks
-    if (fread(&colorRGBA, 1, 4, f) != 4)
-      fferror(f, "AND mask incomplete");
-
-    for (j = 0; j < (width >> 4); j++) 
-      // If more than 32 bits.
-      for (k = 0; k < 32; k++) {
-        ascii_mask[height - i - 1][(j << 4) + k] = MASKBIT(colorRGBA);
-        colorRGBA >>= 1;
-      if (fread(&colorRGBA, 1, 4, f) != 4)
-        fferror(f, "AND mask incomplete");
-      }
-    
-    for (k = 0; k < (width & 0x001F); k++)
-      ascii_mask[height - i - 1][(width & 0xFFE0) | k] = MASKBIT(colorRGBA);
-
+  for (i = height - 1; i >= 0; i--) {
     // Add NULL terminator
-    ascii_mask[height][width] = 0x0;
-  }
+    ascii_mask[i][width] = 0x0;
 
+    // Read 32-bit chunks
+    for (j = 0; j < width ; j += 0x20) {
+      if (fread(maskbits, 1, 4, f) != 4)
+        fferror(f, "AND mask incomplete");
+      // byte by byte (can't use int because of little-endianness)
+      for (k = 0; (k < 0x20) & (j + k < width); k++) {
+        if ((k & 0x07) == 0) {
+          byte = maskbits[k >> 3];
+        }
+        ascii_mask[i][j + k] = MASKBIT(byte);
+        byte <<= 1;
+      }
+    }
+  }
   // Print the mask to stdout
   puts("AND mask:");
   for (i = 0; i < height; i++) {
-    puts(ascii_mask[height]);
+    puts(ascii_mask[i]);
   }   
 
   return 0;
@@ -271,7 +277,7 @@ int show_icon_mask(FILE* f, ICONDIRENTRY* direntry, BITMAPINFOHEADER* hdr) {
 
 int extract_bmp(FILE* f, ICONDIRENTRY* direntry, arguments* args) {
 
-  // TODO: Extract only the image, not the AND mask
+  // TODO: Add the biClrUsed value to the BitmapInfoHeader
   FILE* sf;
   char* savefile;
   char* extpos; // position of last dot in filename
@@ -308,18 +314,20 @@ int extract_bmp(FILE* f, ICONDIRENTRY* direntry, arguments* args) {
 
   // Set the BITMAPFILEHEADER
   memset(&bmp_fheader, 0, BMPFH_SZ);
-  // Total size = 
-  // Magic number + fileheader + BITMAPINFOHEADER + color table + bitmap
+  /* Total size = 
+   * Magic number + fileheader + BITMAPINFOHEADER + color table + bitmap
+   */
   bmp_fheader.size = 2 + BMPFH_SZ + BMIH_SZ + clrtbl_sz + bmp_sz;
   // Compute bitmap image data offset (starting with the color table)
-  bmp_fheader.offset = 0x36; // BMPFH (0x0E) + BMPIH (0x28)
+  // BMPFH (0x0E) + BMPIH (0x28) + clrtbl_sz
+  bmp_fheader.offset = 0x36 + clrtbl_sz; 
 
   // Write the BITMAPFILEHEADER to the file
   fwrite(&bm, 2, 1, sf);
   fwrite(&bmp_fheader, BMPFH_SZ, 1, sf);
 
   // Allocate memory for colortable + bitmap buffer
-  if ((buffer = (u_int8_t*)malloc(clrtbl_sz + bmp_sz)) == NULL) {
+  if ((buffer = (u_int8_t*)malloc(direntry->dwBytesInRes)) == NULL) {
     memerror("extract - buffer");
     fclose(sf);
     free(savefile);
@@ -332,6 +340,10 @@ int extract_bmp(FILE* f, ICONDIRENTRY* direntry, arguments* args) {
   // Drop the AND mask
   bmp_header = (BITMAPINFOHEADER*)buffer;
   bmp_header->biHeight /= 2;
+ 
+  if (direntry->wBitCount <= 8) {
+    bmp_header->biClrUsed = 1 << direntry->wBitCount;
+  }
 
   fwrite(buffer, 1, BMIH_SZ + clrtbl_sz + bmp_sz, sf);
   free(buffer);
